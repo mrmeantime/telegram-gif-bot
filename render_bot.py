@@ -8,7 +8,8 @@ import subprocess
 import shutil
 import requests
 import threading
-from flask import Flask
+import socket
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -20,27 +21,29 @@ print("Starting GIF Bot for Render...")
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Create Flask app for health check
-app = Flask(__name__)
+# Simple HTTP server for health checks
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'GIF Bot is running!')
+    
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP logs
 
-@app.route('/')
-def health_check():
-    return "GIF Bot is running!"
-
-@app.route('/health')
-def health():
-    return {"status": "healthy", "bot": "running"}
-
-def run_flask():
-    """Run Flask server in background thread."""
+def run_health_server():
+    """Run simple HTTP server for Render health checks."""
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    print(f"Health server running on port {port}")
+    server.serve_forever()
 
 # Bot configuration
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # Get from environment variable
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 EXPORT_DIR = Path("temp_gifs")
 EXPORT_DIR.mkdir(exist_ok=True)
-MAX_SIZE_MB = 8  # Increased from 3MB to 8MB
+MAX_SIZE_MB = 8
 
 def check_ffmpeg():
     """Check if FFmpeg is available."""
@@ -234,10 +237,10 @@ def main():
         print("ERROR: BOT_TOKEN environment variable not set!")
         return
     
-    # Start Flask server in background thread for Render health check
+    # Start health check server in background thread for Render
     print("Starting health check server...")
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
     
     print("Creating bot application...")
     app = Application.builder().token(BOT_TOKEN).build()
@@ -245,7 +248,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ANIMATION | filters.Document.ALL, handle_gif))
     
-    print("Bot starting on Render...")
+    print("Bot starting on Render with improved quality settings...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
