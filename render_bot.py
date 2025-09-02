@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import shutil
 import requests
+import threading
+from flask import Flask
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -17,6 +19,22 @@ print("Starting GIF Bot for Render...")
 # Import telegram libraries
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+# Create Flask app for health check
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "GIF Bot is running!"
+
+@app.route('/health')
+def health():
+    return {"status": "healthy", "bot": "running"}
+
+def run_flask():
+    """Run Flask server in background thread."""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')  # Get from environment variable
@@ -72,15 +90,27 @@ async def convert_to_gif(input_path: Path) -> Path:
         return input_path
     
     try:
-        # Higher quality settings - larger size, better frame rate
-        cmd = [
+        # High quality settings - bigger size, better frame rate, custom palette
+        palette_path = input_path.parent / f"palette_{input_path.stem}.png"
+        
+        # Generate optimized palette for better colors
+        palette_cmd = [
             "ffmpeg", "-i", str(input_path),
-            "-vf", "fps=15,scale=500:-1:flags=lanczos",  # Bigger size, better fps
-            "-loop", "0",
+            "-vf", "fps=15,scale=500:-1:flags=lanczos,palettegen=stats_mode=diff",
+            "-y", str(palette_path)
+        ]
+        subprocess.run(palette_cmd, capture_output=True)
+        
+        # Create high-quality GIF with custom palette
+        gif_cmd = [
+            "ffmpeg", "-i", str(input_path), "-i", str(palette_path),
+            "-lavfi", "fps=15,scale=500:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
             "-y", str(gif_path)
         ]
+        subprocess.run(gif_cmd, capture_output=True)
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Clean up palette
+        palette_path.unlink(missing_ok=True)
         
         if gif_path.exists():
             size_mb = gif_path.stat().st_size / 1024 / 1024
@@ -88,34 +118,33 @@ async def convert_to_gif(input_path: Path) -> Path:
             
             # Only compress if over 8MB now
             if size_mb > 8:
-                print("Over 8MB, reducing size...")
+                print("Over 8MB, reducing size while keeping quality...")
                 medium_path = input_path.parent / f"medium_{gif_path.name}"
-                cmd = [
+                
+                # Generate new palette for medium size
+                med_palette = input_path.parent / f"med_palette_{input_path.stem}.png"
+                palette_cmd = [
                     "ffmpeg", "-i", str(gif_path),
-                    "-vf", "fps=12,scale=400:-1:flags=lanczos",  # Still good quality
+                    "-vf", "scale=400:-1:flags=lanczos,palettegen=stats_mode=diff",
+                    "-y", str(med_palette)
+                ]
+                subprocess.run(palette_cmd, capture_output=True)
+                
+                # Create medium quality with palette
+                cmd = [
+                    "ffmpeg", "-i", str(gif_path), "-i", str(med_palette),
+                    "-lavfi", "scale=400:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
                     "-y", str(medium_path)
                 ]
                 subprocess.run(cmd, capture_output=True)
+                
+                med_palette.unlink(missing_ok=True)
                 
                 if medium_path.exists():
                     gif_path.unlink()
                     gif_path = medium_path
                     size_mb = medium_path.stat().st_size / 1024 / 1024
                     print(f"Medium quality GIF: {size_mb:.2f}MB")
-                    
-                    # Final check - if still over 8MB, make smaller
-                    if size_mb > 8:
-                        small_path = input_path.parent / f"small_{gif_path.name}"
-                        cmd = [
-                            "ffmpeg", "-i", str(gif_path),
-                            "-vf", "fps=10,scale=300:-1",
-                            "-y", str(small_path)
-                        ]
-                        subprocess.run(cmd, capture_output=True)
-                        
-                        if small_path.exists():
-                            gif_path.unlink()
-                            return small_path
             
             return gif_path
             
@@ -204,6 +233,11 @@ def main():
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN environment variable not set!")
         return
+    
+    # Start Flask server in background thread for Render health check
+    print("Starting health check server...")
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
     
     print("Creating bot application...")
     app = Application.builder().token(BOT_TOKEN).build()
