@@ -249,7 +249,8 @@ def main():
     app.add_handler(MessageHandler(filters.ANIMATION | filters.Document.ALL, handle_gif))
     
     print("Bot starting on Render with improved quality settings...")
-    app.run_polling(drop_pending_updates=True)
+    # Clear any existing webhooks and force polling
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
