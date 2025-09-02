@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#
 
 import os
 import logging
@@ -233,7 +232,7 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 def main():
-    """Main function."""
+    """Main function with better conflict handling."""
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN environment variable not set!")
         return
@@ -249,9 +248,23 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ANIMATION | filters.Document.ALL, handle_gif))
     
-    print("Bot starting on Render with improved quality settings...")
-    # Clear any existing webhooks and force polling
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    print("Bot starting on Render with conflict resolution...")
+    
+    # Try to start with better conflict handling
+    try:
+        app.run_polling(
+            drop_pending_updates=True, 
+            allowed_updates=Update.ALL_TYPES,
+            poll_interval=2.0,  # Slower polling to avoid conflicts
+            timeout=20
+        )
+    except Exception as e:
+        print(f"Bot startup failed: {e}")
+        # Wait and try again
+        import time
+        time.sleep(30)
+        print("Retrying bot startup...")
+        app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
