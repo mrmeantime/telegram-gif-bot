@@ -43,7 +43,6 @@ def run_health_server():
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 EXPORT_DIR = Path("temp_gifs")
 EXPORT_DIR.mkdir(exist_ok=True)
-MAX_SIZE_MB = 8
 
 def check_ffmpeg():
     """Check if FFmpeg is available."""
@@ -83,72 +82,28 @@ def upload_to_0x0(file_path):
     return None
 
 async def convert_to_gif(input_path: Path) -> Path:
-    """Convert MP4 to high-quality GIF with better settings."""
-    print(f"Converting {input_path} to high-quality GIF...")
+    """Simple, working GIF conversion."""
+    print(f"Converting {input_path} to GIF...")
     
     gif_path = input_path.with_suffix('.gif')
     
     if not check_ffmpeg():
-        print("FFmpeg not available - keeping original format")
+        print("FFmpeg not available - keeping original")
         return input_path
     
     try:
-        # High quality settings - bigger size, better frame rate, custom palette
-        palette_path = input_path.parent / f"palette_{input_path.stem}.png"
-        
-        # Generate optimized palette for better colors
-        palette_cmd = [
+        # Simple conversion that works
+        cmd = [
             "ffmpeg", "-i", str(input_path),
-            "-vf", "fps=15,scale=500:-1:flags=lanczos,palettegen=stats_mode=diff",
-            "-y", str(palette_path)
-        ]
-        subprocess.run(palette_cmd, capture_output=True)
-        
-        # Create high-quality GIF with custom palette
-        gif_cmd = [
-            "ffmpeg", "-i", str(input_path), "-i", str(palette_path),
-            "-lavfi", "fps=15,scale=500:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "-vf", "scale=400:-1",  # Bigger than before for better quality
             "-y", str(gif_path)
         ]
-        subprocess.run(gif_cmd, capture_output=True)
         
-        # Clean up palette
-        palette_path.unlink(missing_ok=True)
+        subprocess.run(cmd, capture_output=True, check=True)
         
         if gif_path.exists():
             size_mb = gif_path.stat().st_size / 1024 / 1024
-            print(f"High-quality GIF created: {size_mb:.2f}MB")
-            
-            # Only compress if over 8MB now
-            if size_mb > 8:
-                print("Over 8MB, reducing size while keeping quality...")
-                medium_path = input_path.parent / f"medium_{gif_path.name}"
-                
-                # Generate new palette for medium size
-                med_palette = input_path.parent / f"med_palette_{input_path.stem}.png"
-                palette_cmd = [
-                    "ffmpeg", "-i", str(gif_path),
-                    "-vf", "scale=400:-1:flags=lanczos,palettegen=stats_mode=diff",
-                    "-y", str(med_palette)
-                ]
-                subprocess.run(palette_cmd, capture_output=True)
-                
-                # Create medium quality with palette
-                cmd = [
-                    "ffmpeg", "-i", str(gif_path), "-i", str(med_palette),
-                    "-lavfi", "scale=400:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
-                    "-y", str(medium_path)
-                ]
-                subprocess.run(cmd, capture_output=True)
-                
-                med_palette.unlink(missing_ok=True)
-                
-                if medium_path.exists():
-                    gif_path.unlink()
-                    gif_path = medium_path
-                    size_mb = medium_path.stat().st_size / 1024 / 1024
-                    print(f"Medium quality GIF: {size_mb:.2f}MB")
-            
+            print(f"GIF created: {size_mb:.2f}MB")
             return gif_path
             
     except Exception as e:
@@ -159,13 +114,13 @@ async def convert_to_gif(input_path: Path) -> Path:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command."""
     await update.message.reply_text(
-        "Hi! Send me a GIF and I'll optimize it and give you a download link!\n\n"
-        "Works on any device - no special setup needed."
+        "Hi! Send me a GIF and I'll optimize it and give you a download link!"
     )
 
 async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process GIF and provide download link."""
     try:
+        print("Processing GIF message...")
         msg = await update.message.reply_text("Processing your GIF...")
         
         # Get file object
@@ -179,15 +134,17 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("Please send a GIF file!")
             return
         
+        print(f"File detected: {file_name}")
+        
         # Download from Telegram
         file = await context.bot.get_file(file_obj.file_id)
         temp_path = EXPORT_DIR / file_name
         await file.download_to_drive(str(temp_path))
         
-        print(f"Downloaded: {temp_path} ({temp_path.stat().st_size / 1024 / 1024:.2f}MB)")
+        print(f"Downloaded: {temp_path}")
         
         # Convert to GIF
-        await msg.edit_text("Converting to optimized GIF...")
+        await msg.edit_text("Converting to GIF...")
         gif_path = await convert_to_gif(temp_path)
         
         # Clean up temp file if we converted
@@ -200,44 +157,47 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Upload and get download link
         await msg.edit_text("Uploading your GIF...")
         
-        # Try hosting services
         download_url = upload_to_catbox(gif_path)
         if not download_url:
             download_url = upload_to_0x0(gif_path)
         
         if download_url:
             # Create download button
-            keyboard = [[InlineKeyboardButton("📥 Download GIF", url=download_url)]]
+            keyboard = [[InlineKeyboardButton("Download GIF", url=download_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await msg.edit_text(
-                f"✅ Your GIF is ready!\n\n"
-                f"📁 Size: {size_mb:.1f}MB\n"
-                f"🎯 Format: Optimized GIF\n\n"
-                f"Click the button below or copy this link:",
+                f"Your GIF is ready!\n\n"
+                f"Size: {size_mb:.1f}MB\n"
+                f"Format: {gif_path.suffix.upper()}\n\n"
+                f"Click button or copy link:",
                 reply_markup=reply_markup
             )
             
             # Send copyable link
             await update.message.reply_text(f"`{download_url}`", parse_mode='MarkdownV2')
             
+            print(f"Success! Download link: {download_url}")
+            
         else:
-            await msg.edit_text("Upload failed - all services down. Try again later.")
+            await msg.edit_text("Upload failed - try again later.")
         
         # Clean up local file
         gif_path.unlink(missing_ok=True)
         
     except Exception as e:
         print(f"Error processing GIF: {e}")
+        import traceback
+        traceback.print_exc()
         await update.message.reply_text(f"Error: {e}")
 
 def main():
-    """Main function with better conflict handling."""
+    """Main function."""
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN environment variable not set!")
         return
     
-    # Start health check server in background thread for Render
+    # Start health check server in background thread
     print("Starting health check server...")
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
@@ -248,23 +208,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ANIMATION | filters.Document.ALL, handle_gif))
     
-    print("Bot starting on Render with conflict resolution...")
-    
-    # Try to start with better conflict handling
-    try:
-        app.run_polling(
-            drop_pending_updates=True, 
-            allowed_updates=Update.ALL_TYPES,
-            poll_interval=2.0,  # Slower polling to avoid conflicts
-            timeout=20
-        )
-    except Exception as e:
-        print(f"Bot startup failed: {e}")
-        # Wait and try again
-        import time
-        time.sleep(30)
-        print("Retrying bot startup...")
-        app.run_polling(drop_pending_updates=True)
+    print("Bot ready - send GIFs to test!")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
