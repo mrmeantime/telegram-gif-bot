@@ -22,7 +22,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 BOT_TOKEN = os.getenv('BOT_TOKEN')  # Get from environment variable
 EXPORT_DIR = Path("temp_gifs")
 EXPORT_DIR.mkdir(exist_ok=True)
-MAX_SIZE_MB = 3
+MAX_SIZE_MB = 8  # Increased from 3MB to 8MB
 
 def check_ffmpeg():
     """Check if FFmpeg is available."""
@@ -62,8 +62,8 @@ def upload_to_0x0(file_path):
     return None
 
 async def convert_to_gif(input_path: Path) -> Path:
-    """Convert MP4 to optimized GIF - with fallback if FFmpeg unavailable."""
-    print(f"Converting {input_path} to GIF...")
+    """Convert MP4 to high-quality GIF with better settings."""
+    print(f"Converting {input_path} to high-quality GIF...")
     
     gif_path = input_path.with_suffix('.gif')
     
@@ -72,10 +72,10 @@ async def convert_to_gif(input_path: Path) -> Path:
         return input_path
     
     try:
-        # Simple, reliable GIF conversion
+        # Higher quality settings - larger size, better frame rate
         cmd = [
             "ffmpeg", "-i", str(input_path),
-            "-vf", "fps=10,scale=300:-1:flags=lanczos",
+            "-vf", "fps=15,scale=500:-1:flags=lanczos",  # Bigger size, better fps
             "-loop", "0",
             "-y", str(gif_path)
         ]
@@ -84,21 +84,38 @@ async def convert_to_gif(input_path: Path) -> Path:
         
         if gif_path.exists():
             size_mb = gif_path.stat().st_size / 1024 / 1024
-            print(f"GIF created: {size_mb:.2f}MB")
+            print(f"High-quality GIF created: {size_mb:.2f}MB")
             
-            # If too big, make smaller
-            if size_mb > 2:
-                small_path = input_path.parent / f"small_{gif_path.name}"
+            # Only compress if over 8MB now
+            if size_mb > 8:
+                print("Over 8MB, reducing size...")
+                medium_path = input_path.parent / f"medium_{gif_path.name}"
                 cmd = [
                     "ffmpeg", "-i", str(gif_path),
-                    "-vf", "fps=8,scale=200:-1",
-                    "-y", str(small_path)
+                    "-vf", "fps=12,scale=400:-1:flags=lanczos",  # Still good quality
+                    "-y", str(medium_path)
                 ]
                 subprocess.run(cmd, capture_output=True)
                 
-                if small_path.exists():
+                if medium_path.exists():
                     gif_path.unlink()
-                    return small_path
+                    gif_path = medium_path
+                    size_mb = medium_path.stat().st_size / 1024 / 1024
+                    print(f"Medium quality GIF: {size_mb:.2f}MB")
+                    
+                    # Final check - if still over 8MB, make smaller
+                    if size_mb > 8:
+                        small_path = input_path.parent / f"small_{gif_path.name}"
+                        cmd = [
+                            "ffmpeg", "-i", str(gif_path),
+                            "-vf", "fps=10,scale=300:-1",
+                            "-y", str(small_path)
+                        ]
+                        subprocess.run(cmd, capture_output=True)
+                        
+                        if small_path.exists():
+                            gif_path.unlink()
+                            return small_path
             
             return gif_path
             
