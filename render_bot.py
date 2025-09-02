@@ -62,57 +62,43 @@ def upload_to_0x0(file_path):
     return None
 
 async def convert_to_gif(input_path: Path) -> Path:
-    """Convert MP4 to high-quality, small GIF."""
-    print(f"Converting {input_path} to optimized GIF...")
-    
-    if not check_ffmpeg():
-        print("FFmpeg not found - keeping original")
-        return input_path
+    """Convert MP4 to optimized GIF - with fallback if FFmpeg unavailable."""
+    print(f"Converting {input_path} to GIF...")
     
     gif_path = input_path.with_suffix('.gif')
     
+    if not check_ffmpeg():
+        print("FFmpeg not available - keeping original format")
+        return input_path
+    
     try:
-        # Create optimized GIF with custom palette
-        palette_path = input_path.parent / f"palette_{input_path.stem}.png"
-        
-        # Generate palette
-        palette_cmd = [
+        # Simple, reliable GIF conversion
+        cmd = [
             "ffmpeg", "-i", str(input_path),
-            "-vf", "fps=12,scale=320:-1:flags=lanczos,palettegen=stats_mode=diff",
-            "-y", str(palette_path)
-        ]
-        subprocess.run(palette_cmd, capture_output=True, check=True)
-        
-        # Create GIF with palette
-        gif_cmd = [
-            "ffmpeg", "-i", str(input_path), "-i", str(palette_path),
-            "-lavfi", "fps=12,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
+            "-vf", "fps=10,scale=300:-1:flags=lanczos",
+            "-loop", "0",
             "-y", str(gif_path)
         ]
-        subprocess.run(gif_cmd, capture_output=True, check=True)
         
-        # Clean up palette
-        palette_path.unlink(missing_ok=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         
         if gif_path.exists():
             size_mb = gif_path.stat().st_size / 1024 / 1024
             print(f"GIF created: {size_mb:.2f}MB")
             
-            # If still too big, make smaller
-            if size_mb > 2.5:
-                print("Making smaller...")
+            # If too big, make smaller
+            if size_mb > 2:
                 small_path = input_path.parent / f"small_{gif_path.name}"
                 cmd = [
                     "ffmpeg", "-i", str(gif_path),
-                    "-vf", "fps=8,scale=250:-1:flags=lanczos",
+                    "-vf", "fps=8,scale=200:-1",
                     "-y", str(small_path)
                 ]
                 subprocess.run(cmd, capture_output=True)
                 
                 if small_path.exists():
                     gif_path.unlink()
-                    gif_path = small_path
-                    print(f"Smaller GIF: {small_path.stat().st_size / 1024 / 1024:.2f}MB")
+                    return small_path
             
             return gif_path
             
