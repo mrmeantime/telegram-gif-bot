@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: telegram-gif-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python3 render_bot.py
-    envVars:
-      - key: PORT
-        value: 10000
