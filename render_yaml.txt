@@ -2,8 +2,9 @@ services:
   - type: web
     name: telegram-gif-bot
     env: python
+    pythonVersion: 3.12.6   # 👈 Forces Render to use this
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python3 render_bot.py
     autoDeploy: true
     envVars:
