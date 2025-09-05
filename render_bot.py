@@ -1,87 +1,121 @@
 import os
 import logging
-from telegram import Update
+import requests
+from telegram import Update, InputFile
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters,
+    filters
 )
 
-# -----------------------------
+# --------------------------------------
 # Logging Setup
-# -----------------------------
+# --------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# -----------------------------
-# Load BOT Token
-# -----------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# --------------------------------------
+# Environment Variables
+# --------------------------------------
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("⚠️ BOT_TOKEN is not set! Please configure it in Render environment variables.")
+    raise ValueError("TELEGRAM_TOKEN environment variable not set!")
 
-# -----------------------------
-# Command Handlers
-# -----------------------------
+# --------------------------------------
+# Simple Welcome Command
+# --------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Triggered when the user sends /start"""
-    await update.message.reply_text("👋 Hi! Send me a GIF and I'll process it!")
+    await update.message.reply_text(
+        "👋 Hi! I'm your GIF Bot!\n\n"
+        "• Send me a keyword and I'll fetch a GIF.\n"
+        "• Use /help for more commands."
+    )
 
+# --------------------------------------
+# Help Command
+# --------------------------------------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Triggered when the user sends /help"""
-    await update.message.reply_text("ℹ️ Just send me a GIF, and I'll process it for you!")
+    await update.message.reply_text(
+        "🛠 *Available Commands:*\n"
+        "/start → Start the bot\n"
+        "/help → Show this message\n"
+        "Just send any keyword, and I'll fetch a GIF for you!",
+        parse_mode="Markdown"
+    )
 
-# -----------------------------
-# GIF Handler
-# -----------------------------
-async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming GIFs"""
-    if update.message and update.message.animation:
-        gif_file = update.message.animation.file_id
-        logger.info(f"Received GIF with file_id: {gif_file}")
-        await update.message.reply_text("✅ Got your GIF! Processing...")
-        # You can add extra GIF processing logic here if needed later.
+# --------------------------------------
+# Fetch GIFs from Giphy API
+# --------------------------------------
+GIPHY_API_KEY = os.getenv("GIPHY_API_KEY")
+GIPHY_URL = "https://api.giphy.com/v1/gifs/search"
+
+def fetch_gif(query: str):
+    params = {
+        "api_key": GIPHY_API_KEY,
+        "q": query,
+        "limit": 1,
+        "rating": "pg-13"
+    }
+    try:
+        response = requests.get(GIPHY_URL, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if data["data"]:
+            return data["data"][0]["images"]["original"]["url"]
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching GIF: {e}")
+        return None
+
+# --------------------------------------
+# Handle User Messages (GIF Search)
+# --------------------------------------
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    if not query:
+        await update.message.reply_text("⚠️ Please send me a keyword!")
+        return
+
+    await update.message.reply_text(f"🔍 Searching GIF for: *{query}* ...", parse_mode="Markdown")
+
+    gif_url = fetch_gif(query)
+    if gif_url:
+        await update.message.reply_animation(animation=gif_url)
     else:
-        await update.message.reply_text("❌ That doesn’t look like a GIF!")
+        await update.message.reply_text("😕 Sorry, I couldn't find a GIF for that.")
 
-# -----------------------------
+# --------------------------------------
 # Error Handler
-# -----------------------------
+# --------------------------------------
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Log and report errors"""
-    logger.error("Exception while handling update:", exc_info=context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("⚠️ Something went wrong! Please try again later.")
+    logger.error(f"Update {update} caused error {context.error}")
 
-# -----------------------------
-# Main Bot Entry Point
-# -----------------------------
+# --------------------------------------
+# Main App
+# --------------------------------------
 def main():
-    print("🚀 Starting Telegram GIF Bot...")
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Build application
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    # Register commands
+    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    # Register GIF message handler
-    app.add_handler(MessageHandler(filters.ANIMATION, handle_gif))
+    # Message Handler (GIF Fetch)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Register error handler
+    # Errors
     app.add_error_handler(error_handler)
 
-    # Start polling
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("🚀 Bot started successfully!")
+    app.run_polling()
 
-# -----------------------------
-# Run Bot
-# -----------------------------
+# --------------------------------------
+# Entry Point
+# --------------------------------------
 if __name__ == "__main__":
     main()
