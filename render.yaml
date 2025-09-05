@@ -2,11 +2,7 @@ services:
   - type: web
     name: telegram-gif-bot
     env: python
+    pythonVersion: 3.11.9
+    buildCommand: "pip install --upgrade pip setuptools wheel && pip install -r requirements.txt"
+    startCommand: "python render_bot.py"
     plan: free
-    buildCommand: |
-      pip install --upgrade pip
-      pip install --no-cache-dir -r requirements.txt
-    startCommand: python3 render_bot.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.8
